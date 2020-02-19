@@ -1,0 +1,281 @@
+#!/bin/bash
+# Amanda Lawrence
+# January 22, 2019
+# CS 344 - Operating Systems
+# Program 1: Matrices
+
+# Must have the following operations: dims, transpose , mean, add, and multiply
+# Those operations must be used as follows:
+#		matrix dims [MATRIX]
+#		matrix transpose [MATRIX]
+#		matrix mean [MATRIX]
+#		matrix add MATRIX_LEFT MATRIX_RIGHT
+#		matrix multiply MATRIX_LEFT MATRIX_RIGHT
+# dims: should print dimensions of matrix as number of rows, followed by a space, then the number of columns
+# transpose: reflect the elements of the matrix along main diagonal. An MxN Matrix will become an NxM matrix. The values in the main diagonal stays the same.
+# mean: takes MxN matrix and returns an 1xN row vector, where the first element is the mean of column 1, the second element is the mean of column 2, etc.
+# add: takes two MxN matrices and adds them together element-wise to produce a new MxN matrix. add should return an error if the matrices do not have the same dimensions.
+# multiply: should take an MxN and NxP matrix and produce an MxP matrix. Note: mstrix multiplication is not commutative.
+
+# Must check for invalid matrices when outputting matrices. These include: empty matrices, a matrix where the final entry on a row is followed by a tab character, a matrix with empty lines, a matrix with any element what is blank or not an integer. 
+# If inputs arer valid, program should only output to stdout and not stderr. If inputs are not valid, program should only output to stderr and not stdin. 
+
+# Use temporary files, not arrays. The temporary file should include the process id as part of the name. Program should remove any temporary files when program is done. Should also use the trap command, to catch, interrupt, hangup, and terminate signals to remove temp files if program is terminated unexpectedly. 
+
+# To use the grading script, place it in the same directory as this script and run it with:
+#		./p1gradingscript matrix
+
+
+#Setting up the temporary files 
+temp_matrix1="temp1_$$"
+temp_matrix2="temp2_$$"
+temp_trans="temp3_$$"
+temp_mean="temp4_$$"
+temp_col="temp5_$$"
+temp_add_col1="temp6_$$"
+temp_add_col2="temp7_$$"
+temp_add="temp8_$$"
+temp_current_col="temp9_$$"
+temp_add_final="temp10_$$"
+temp_m1_row="temp11_$$"
+temp_m2_col="temp12_$$"
+temp_output_row="temp13_$$"
+temp_output_matrix="temp14_$$"
+
+list_of_temp_files="$temp_matrix1 $temp_matrix2 $temp_trans $temp_mean $temp_col"
+list_of_temp_files+=" $temp_add_col1 $temp_add_col2 $temp_add $temp_current_col"
+list_of_temp_files+=" $temp_add_final $temp_m1_row $temp_m2_col $temp_output_row $temp_output_matrix"
+#echo "crap: $list_of_temp_files"
+#exit
+#trap "rm -v $list_of_temp_files 2>/dev/null" EXIT
+#trap "rm -v $list_of_temp_files" EXIT
+trap 'rm $list_of_temp_files >&/dev/null' EXIT
+
+
+dims(){
+	#Get the number of rows by using echo and grep to clean up unneeded whitespace to clean up the line number outputted by wc -l.
+	ROWS=`echo $(grep -v '^$' $1 | wc -l)`
+
+	#Get the number of words, or values, by using wc -w and cleaning unneeded whitespace by using echo and grep.
+	WORD_COUNT=`echo $(grep -v '^$' $1 | wc -w)`
+
+	#Get the column number by diving the number of words by rows.
+	COLS=$((WORD_COUNT/ROWS))
+	echo "$ROWS $COLS"
+
+}
+
+
+transpose(){
+	#use the dims function and grab the column value it outputs by cutting by spaces and selecting the value in the second field.
+	COLS=`dims $1 | cut -d ' ' -f2`
+
+	#for each column in the matrix, cut the matrix by field (columns) and use echo to sanitize it of tabs and newlines
+	# then transform the spaces to tabs and put this into temp_trans file as a row.
+	rm $temp_trans 2>/dev/null	#remove an existing temp_trans file, if it exists, just in case. 
+	for (( colnum = 1; colnum <= $COLS; colnum++ )); do
+		echo `cut -f$colnum $1` | tr ' ' '\t' >> $temp_trans
+	done
+	cat $temp_trans
+	rm $temp_trans 2>/dev/null #remove temp_trans file when done
+}
+
+
+mean(){
+	COLS=`dims $1 | cut -d ' ' -f2`
+	#echo "The number of COLS is $COLS"
+	ROWS=`dims $1 | cut -d ' ' -f1`
+	#echo "The number of ROWS is $ROWS"
+	COLUMN_SUM=0
+
+	# For every column in the matrix, split the the matrix by field (columns), then add each word (number) in the column and save this sum to COLUMN_SUM
+	for (( colnum = 1; colnum <= $COLS; colnum++ )); do
+		echo `cut -f$colnum $1` | tr '\n' ' ' >> $temp_col 
+
+	SUM=0; for value in `cat $temp_col`; do SUM=$((SUM + value)); done
+
+	#As provided in our homework assignment, the formula for properly rounding when dividing 2 integers:
+		# (SUM + (ROWS / 2)*( (SUM>0)*2-1 )) /ROWS
+		# Also, transform the newlines to tabs between the mean values and write this into the temp_mean file.
+	echo $((( $SUM  + ( $ROWS / 2 ) * ( ( $SUM > 0 ) * 2 - 1 ) ) / $ROWS )) | tr '\n' '\t' >> $temp_mean
+
+	rm $temp_col 2>/dev/null #remove the temp_col file to clear it for the next column 
+	done
+
+	#echo "" >> $temp_mean #add a newline to the end of the temp_mean file
+	echo `cat $temp_mean` | tr ' ' '\t'
+	rm $temp_mean 2>/dev/null #remove the temp_col file when function is done
+}
+
+
+add(){
+
+	#number of columns in Matrix1 
+	COLS1=`dims $1 | cut -d ' ' -f2`
+	#number of rows in Matrix1
+	ROWS1=`dims $1 | cut -d ' ' -f1`
+
+	#number of columns in Matrix2
+	COLS2=`dims $2 | cut -d ' ' -f2`
+	#number of rows in Matrix2
+	ROWS2=`dims $2 | cut -d ' ' -f1`
+	CURRENT_SUM=0
+
+	if [ "$COLS1" -ne "$COLS2" ] || [ "$ROWS1" -ne "$ROWS2" ] ; then
+		echo "Cannot complete the add function as dimensions do not match" >&2
+		exit 1
+	else
+		# For every column in the matrix, split the the matrix by field (columns), then add each word (number) in the column and save this sum to COLUMN_SUM
+		for (( colnum = 1; colnum <= $COLS1; colnum++ )); do
+			echo `cut -f$colnum $1` >> $temp_add_col1 #For temporarily storing a column from the first matrix passed to the add function
+			echo `cut -f$colnum $2` >> $temp_add_col2 #For temporarily storing a column from the second matrix passed to the add function
+
+			#Sums up the values from two columns, and places that value, CURRENT_SUM, into a new column, temp_current_col
+			for (( value_in_column = 1; value_in_column <= ROWS1; value_in_column++ )); do
+				FIRST_VAL=`cut -d ' ' -f $value_in_column $temp_add_col1`
+				SECOND_VAL=`cut -d ' ' -f $value_in_column $temp_add_col2`
+				CURRENT_SUM=$(($FIRST_VAL + $SECOND_VAL))
+				echo $CURRENT_SUM >> $temp_current_col
+			done
+
+			#paste the temp_current_col along with the any existing summed columns
+
+			if [ $colnum -eq 1 ] 
+			then
+				cat $temp_current_col > $temp_add_final
+			else
+				paste $temp_add_final $temp_current_col > $temp_add
+				mv -f $temp_add $temp_add_final
+			fi
+
+			rm $temp_add_col1 2>/dev/null #remove the temp_add_col file to clear it for the next column 
+			rm $temp_add_col2 2>/dev/null #remove the temp_add_col file to clear it for the next column 
+			rm $temp_current_col 2>/dev/null #remove the temp_current_col file to clear it for the next column
+		done
+	fi
+	cat $temp_add_final
+	#rm $temp_add 2>/dev/null #remove the temp_add file when function is done
+	#rm $temp_add_final 2>/dev/null #remove the temp_add_final file when function is done
+}
+
+
+multiply(){
+	#number of columns in Matrix1 
+	COLS1=`dims $1 | cut -d ' ' -f2`
+	#number of rows in Matrix1
+	ROWS1=`dims $1 | cut -d ' ' -f1`
+
+	#number of columns in Matrix2
+	COLS2=`dims $2 | cut -d ' ' -f2`
+	#number of rows in Matrix2
+	ROWS2=`dims $2 | cut -d ' ' -f1`
+
+	# check that COLS1 of Matrix1 is equal to ROWS2 of Matrix2. Must be the same to continue. Note: our new matrix will be ROWS1 x COLS2
+	#Then, we can multiply the first row of Matrix1 by the first column of Matrix2.
+	if [ "$COLS1" -ne "$ROWS2" ] ; then
+		echo "Cannot complete the add function as Matrix 1 columns do not match Matrix 2 rows." >&2
+		exit 1
+	else
+		# We will split Matrix1 by its rows, and we will split Matrix2 by its columns 
+		for (( i = 1; i <= $ROWS1; i++ )) ; do #For every row in Matrix1, cut and take a row
+			head -n $i $1 | tail -n +$i | tr '\t' ' ' >> $temp_m1_row
+			for (( j = 1; j<=$COLS2; j++ )) ; do # For every column in Matrix2, cut and take a column
+				echo `cut -f$j $2` >> $temp_m2_col
+				SUM=0
+				for (( pos_in_row=1; pos_in_row<=COLS1; pos_in_row++ )) ; do
+					ROW_VAL=`cut -d ' ' -f$pos_in_row $temp_m1_row`
+					COL_VAL=`cut -d ' ' -f$pos_in_row $temp_m2_col`
+					PRODUCT=$(( $ROW_VAL * $COL_VAL ))
+					SUM=$(( $SUM + $PRODUCT ))
+				done
+				echo -ne "$SUM " >> $temp_output_row
+				rm $temp_m2_col 2>/dev/null #clear the temp_m2_col file for the next iteration
+			done
+			echo `cat $temp_output_row` | tr ' ' '\t' >> $temp_output_matrix
+			rm $temp_output_row 2>/dev/null #clear the temp_output_row so we can use this temp file to create a new row of values
+			rm $temp_m1_row 2>/dev/null #clear the temp_m1_row file for the next iteration
+		done
+		cat $temp_output_matrix
+	fi
+}
+
+
+#----------------------------------------------------------------------------------------------------------------
+
+
+function generate(){
+	y=0
+	a=$3
+	b=$4
+	while [ $y -lt $1 ]
+	do
+		x=0
+		((y++))
+		while [ $x -lt $2 ]
+		do
+			((x++))
+			echo -n $((RANDOM%(b-a+1)+a))
+			if [ $x -ne $2 ]
+			then
+			echo -ne "\t"
+			else
+				echo
+			fi
+		done
+	done
+}
+
+generate 5 4 2 10 >"m3"
+
+
+if [ "$#" = "0" ]; then
+	echo "No operation given!!" >&2
+	exit 1
+fi
+
+if [ "$#" = "1" ] ; then
+	#take in the file name from stdin
+	cat > "$temp_matrix1"
+elif [ $# -gt 1 ]; then
+	# take in the file name as the first argument after ./matrix function
+	temp_matrix1="$2"
+fi
+
+if [ "$#" = "3" ] ; then
+	# take in the file name as the second argument after ./matrix function first_matrix_file
+	temp_matrix2="$3"
+	if [ ! -r "$3" ]; then
+		echo "File $3 is not found or readable." >&2
+		exit 1
+	fi
+fi
+
+if [ ! -r "$temp_matrix1" ]; then
+	echo "File $2 is not found or readable." >&2
+	exit 1
+fi
+
+if [ "$1" = "dims" ]; then
+	if [ $# -gt 2 ]; then
+		echo "Error: Too many arguments for dims function." >&2
+		exit 1
+	fi
+	dims $temp_matrix1
+elif [ "$1" = "transpose" ]; then
+	transpose $temp_matrix1
+elif [ "$1" = "mean" ]; then
+	mean $temp_matrix1
+elif [ "$1" = "add" ]; then
+	add $temp_matrix1 $temp_matrix2
+elif [ "$1" = "multiply" ]; then
+	multiply $temp_matrix1 $temp_matrix2
+else 
+	echo "couldn't find what you're looking for. Invalid command" >&2
+	exit 1
+fi
+
+
+
+#trap "rm $list_of_temp_files >&2" EXIT
+
+
